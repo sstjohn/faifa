@@ -49,21 +49,19 @@
 
 #include "homeplug_av.h"
 
-#ifndef FAIFA_PROG
-#define FAIFA_PROG "faifa"
-#endif
 
 /* Command line arguments storing */
 int opt_help = 0;
 int opt_key = 0;
 const char *opt_fname = NULL;
+const char *prog_name = NULL;
 
 /**
  * error - display error message
  */
 static void error(char *message)
 {
-	fprintf(stderr, "%s: %s\n", FAIFA_PROG, message);
+	fprintf(stderr, "%s: %s\n", prog_name, message);
 }
 
 /**
@@ -139,13 +137,15 @@ int recv_read_confirmation(faifa_t *faifa, char *pib, int *offset)
 void pib_write_file(char* pib)
 {
 	const char *fname;
-	FILE *file = fopen(fname, "w");
+	FILE *file;
 	int i;
 
 	if (NULL != opt_fname)
 		fname = opt_fname;
 	else
 		fname = "./pibtool.out";
+
+	file = fopen(fname, "w");
 
 	for (i = 0; i < 16352; i++)
 		fprintf(file, "%c", pib[i]);
@@ -156,13 +156,15 @@ void pib_write_file(char* pib)
 void pib_read_file(char *pib)
 {
 	const char *fname;
-	FILE *file = fopen(fname, "r");
+	FILE *file;
 	int offset = 0;
 
 	if (NULL != opt_fname)
 		fname = opt_fname;
 	else
 		fname = "./pibtool.in";
+
+	file = fopen(fname, "r");
 
 	while (!feof(file)) {
 		int read = fread(&pib[offset], 1, 0x400, file);
@@ -176,19 +178,17 @@ int pib_dump(faifa_t *faifa)
 {
 	int offset = 0;
 	char *pib = malloc(16352);
-	int err = 0;
+	int res = 0;
 
 	/* this is super insecure */
 	while (offset < 16352) {
 		int len = (16352 - offset < 0x400) ?
 				16352 - offset :
 				0x400;
-		if (-1 == send_read_request(faifa, len, offset)) {
-			err = 1;
+		if (-1 == ((res = send_read_request(faifa, len, offset)))) {
 			break;
 		}
-		if (-1 == recv_read_confirmation(faifa, pib, &offset)) {
-			err = 1;
+		if (-1 == ((res = recv_read_confirmation(faifa, pib, &offset)))) {
 			break;
 		}
 	}
@@ -196,6 +196,16 @@ int pib_dump(faifa_t *faifa)
 	pib_write_file(pib);
 
 	free(pib);
+	return res;
+}
+
+int pib_write(faifa_t *faifa)
+{
+	char *pib = malloc(16352);
+	int offset = 0;
+
+	pib_read_file(pib);
+
 }
 
 /**
@@ -215,7 +225,9 @@ int main(int argc, char **argv)
 	int ret = 0;
 	u_int8_t addr[ETHER_ADDR_LEN] = { 0 };
 
-	fprintf(stdout, "%s for HomePlug AV (SVN revision %d)\n\n", basename(argv[0]), SVN_REV);
+	prog_name = strdup(basename(argv[0]));
+
+	fprintf(stdout, "%s for HomePlug AV (SVN revision %d)\n\n", prog_name, SVN_REV);
 
 	if (argc < 2) {
 		usage();
@@ -284,7 +296,14 @@ int main(int argc, char **argv)
 		faifa_set_dst_addr(faifa, addr);
 	}
 
-	pibdump(faifa);
+	if (opt_dump) {
+		pib_dump(faifa);
+	} else if (opt_write) {
+		pib_write(faifa);
+	} else {
+		error("nothing to do");
+		ret = -1;
+	}
 
 out_error:
 	faifa_close(faifa);
