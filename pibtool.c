@@ -56,6 +56,7 @@
 /* Command line arguments storing */
 int opt_help = 0;
 int opt_key = 0;
+const char *opt_fname = NULL;
 
 /**
  * error - display error message
@@ -135,19 +136,43 @@ int recv_read_confirmation(faifa_t *faifa, char *pib, int *offset)
 	return res;
 }
 
-void pibwrite(char* pib)
+void pib_write_file(char* pib)
 {
-	char *fname = "./pibdump.out";
+	const char *fname;
 	FILE *file = fopen(fname, "w");
 	int i;
 
-	for(i = 0; i < 16352; i++)
+	if (NULL != opt_fname)
+		fname = opt_fname;
+	else
+		fname = "./pibtool.out";
+
+	for (i = 0; i < 16352; i++)
 		fprintf(file, "%c", pib[i]);
 
 	fclose(file);	
 }
 
-int pibdump(faifa_t *faifa)
+void pib_read_file(char *pib)
+{
+	const char *fname;
+	FILE *file = fopen(fname, "r");
+	int offset = 0;
+
+	if (NULL != opt_fname)
+		fname = opt_fname;
+	else
+		fname = "./pibtool.in";
+
+	while (!feof(file)) {
+		int read = fread(&pib[offset], 1, 0x400, file);
+		offset += read;	
+	}
+
+	fclose(file);
+}
+
+int pib_dump(faifa_t *faifa)
 {
 	int offset = 0;
 	char *pib = malloc(16352);
@@ -168,7 +193,7 @@ int pibdump(faifa_t *faifa)
 		}
 	}
 
-	pibwrite(pib);
+	pib_write_file(pib);
 
 	free(pib);
 }
@@ -184,6 +209,8 @@ int main(int argc, char **argv)
 	char *opt_ifname = NULL;
 	char *opt_macaddr = NULL;
 	int opt_verbose = 0;
+	int opt_write = 0;
+	int opt_dump = 0;
 	int c;
 	int ret = 0;
 	u_int8_t addr[ETHER_ADDR_LEN] = { 0 };
@@ -195,13 +222,22 @@ int main(int argc, char **argv)
 		return -1;
 	}
 
-	while ((c = getopt(argc, argv, "i:a:k:vh")) != -1) {
+	while ((c = getopt(argc, argv, "di:a:k:f:wvh")) != -1) {
 		switch (c) {
 			case 'i':
 				opt_ifname = optarg;
 				break;
 			case 'a':
 				opt_macaddr = optarg;
+				break;
+			case 'f':
+				opt_fname = optarg;
+				break;
+			case 'd':
+				opt_dump = 1;
+				break;
+			case 'w':
+				opt_write = 1;
 				break;
 			case 'k':
 				opt_key = 1;
