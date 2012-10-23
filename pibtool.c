@@ -43,6 +43,7 @@
 #include <sys/types.h>
 #include <arpa/inet.h>
 
+#include "crc32.h"
 #include "faifa.h"
 #include "faifa_compat.h"
 #include "faifa_priv.h"
@@ -121,14 +122,34 @@ int send_read_request(faifa_t *faifa, int len, int offset)
 	return res;
 }
 
+uint32_t checksum(const char *data, size_t len)
+{
+	uint32_t sum = 0xffffffff;
+	int i = 0;
+	for ( ; i < len; i++)
+	{
+		sum ^= (uint32_t)((unsigned char)data[i]);
+		sum = (sum >> 8) | (sum << 24);
+	}
+	return sum;
+}
+
 int recv_read_confirmation(faifa_t *faifa, char *pib, int *offset)
 {
 	struct read_confirmation_frame *f = malloc(ETHER_MAX_LEN);
 	int res;
+	uint32_t cksum;
 
 	res = faifa_recv(faifa, (char *)f, ETHER_MAX_LEN);
+	
+	cksum = checksum((char *)f->response.data, f->response.length);
+	if (cksum != f->response.checksum)
+		printf("checksum mismatch %08x != %08x !\n", cksum, f->response.checksum);
+
  	memcpy(&pib[*offset], &f->response.data, f->response.length);
 	*offset += f->response.length;
+
+
 
 	free(f);
 	return res;
@@ -151,27 +172,6 @@ void pib_write_file(char* pib)
 		fprintf(file, "%c", pib[i]);
 
 	fclose(file);	
-}
-
-void pib_read_file(char *pib)
-{
-	const char *fname;
-	FILE *file;
-	int offset = 0;
-
-	if (NULL != opt_fname)
-		fname = opt_fname;
-	else
-		fname = "./pibtool.in";
-
-	file = fopen(fname, "r");
-
-	while (!feof(file)) {
-		int read = fread(&pib[offset], 1, 0x400, file);
-		offset += read;	
-	}
-
-	fclose(file);
 }
 
 int pib_dump(faifa_t *faifa)
@@ -199,6 +199,119 @@ int pib_dump(faifa_t *faifa)
 	return res;
 }
 
+struct write_request_frame {
+			struct ether_header eth_header;
+			struct hpav_frame_header hpav_header;
+			struct hpav_frame_vendor_payload payload;
+			struct write_mod_data_request request;
+} __attribute__((__packed__));
+
+struct write_confirmation_frame {
+	union {
+		struct {
+			struct ether_header eth_header;
+			struct hpav_frame_header hpav_header;
+			struct hpav_frame_vendor_payload payload;
+			struct write_mod_data_confirm response;
+		};
+		char data[60];
+	};
+} __attribute__((__packed__));
+
+struct nvm_write_request_frame {
+	union {
+		struct {
+			struct ether_header eth_header;
+			struct hpav_frame_header hpav_header;
+			struct hpav_frame_vendor_payload payload;
+			struct write_module_data_to_nvm_request request;
+		};
+		char data[60];
+	};
+} __attribute__((__packed__));
+
+int send_commit_write_to_nvm(faifa_t *faifa, int module)
+{
+	struct nvm_write_request_frame f;	
+	int res = 0;
+
+	memcpy(f.eth_header.ether_dhost, faifa->dst_addr, ETHER_ADDR_LEN);
+	f.eth_header.ether_type = htons(ETHERTYPE_HOMEPLUG_AV);
+
+	f.hpav_header.mmtype = HPAV_MMTYPE_NVM_MOD_REQ;
+	f.payload.oui[1] = 0xb0;
+	f.payload.oui[2] = 0x52;
+
+	f.request.module_id = module;
+
+	res = faifa_send(faifa, &f, sizeof(f));
+	if(-1 == res) {
+		error(faifa_error(faifa));
+	}
+
+	return res;
+	
+}	
+
+int send_write_request(faifa_t *faifa, const char *pib, int offset, int len)
+{
+	struct write_request_frame *f = malloc(ETHER_MAX_LEN);
+	int res = 0;
+
+	memset(f, 0, ETHER_MAX_LEN);
+
+	memcpy(f->eth_header.ether_dhost, faifa->dst_addr, ETHER_ADDR_LEN);
+	f->eth_header.ether_type = htons(ETHERTYPE_HOMEPLUG_AV);
+
+	f->hpav_header.mmtype = HPAV_MMTYPE_WR_MOD_REQ;
+	f->payload.oui[0] = 0;
+	f->payload.oui[1] = 0xb0;
+	f->payload.oui[2] = 0x52;
+
+	f->request.module_id = 2;
+	f->request.length = len;
+	f->request.offset = offset;
+	f->request.checksum = checksum(&pib[offset], len);
+
+	memcpy(&f->request.data, &pib[offset], len);
+	
+	res = faifa_send(faifa, f, sizeof(struct write_request_frame) + len);
+	if(-1 == res) {
+		error(faifa_error(faifa));
+	}
+
+	return res;
+}
+
+void pib_read_file(char *pib)
+{
+	const char *fname;
+	FILE *file;
+	int offset = 0;
+
+	if (NULL != opt_fname)
+		fname = opt_fname;
+	else
+		fname = "./pibtool.in";
+
+	file = fopen(fname, "r");
+
+	while (!feof(file)) {
+		int read = fread(&pib[offset], 1, 0x400, file);
+		offset += read;	
+	}
+
+	fclose(file);
+}
+
+void recv_write_confirmation(faifa_t *faifa)
+{
+	struct write_confirmation_frame f;
+	int res;
+
+	res = faifa_recv(faifa, (char *)&f, sizeof(struct write_confirmation_frame));
+}
+
 int pib_write(faifa_t *faifa)
 {
 	char *pib = malloc(16352);
@@ -206,8 +319,29 @@ int pib_write(faifa_t *faifa)
 
 	pib_read_file(pib);
 
+	for (offset = 0; offset < 16352; offset += 0x400) {
+		int len = (offset + 0x400 > 16352) ?
+				16352 - offset :
+				0x400;
+		send_write_request(faifa, pib, offset, len);
+		recv_write_confirmation(faifa);
+	}
+	
+	send_commit_write_to_nvm(faifa, 2);	
 }
 
+
+void checksum_test()
+{
+	uint32_t cksum;
+	char *buf = malloc(1024);
+	
+	memset(buf, 0, 1024);
+	
+	cksum = checksum(buf, 1024);
+	printf("checksum_test: 0x%08x\n", cksum);
+	free(buf);
+}
 /**
  * main - main function of faifa
  * @argc:	number of arguments
@@ -295,6 +429,8 @@ int main(int argc, char **argv)
 
 		faifa_set_dst_addr(faifa, addr);
 	}
+
+	checksum_test();
 
 	if (opt_dump) {
 		pib_dump(faifa);
