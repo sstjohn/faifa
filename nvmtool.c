@@ -102,7 +102,8 @@ int send_read_request(faifa_t *faifa, int len, int offset)
 	int res;
 	struct read_request_frame f;
 	
-	memcpy(f.eth_header.ether_dhost, ((struct faifa *)faifa)->dst_addr, ETHER_ADDR_LEN);
+	memcpy(f.eth_header.ether_dhost, ((struct faifa *)faifa)->dst_addr, 
+								ETHER_ADDR_LEN);
 	memset(f.eth_header.ether_shost, 0, ETHER_ADDR_LEN);
 	f.eth_header.ether_type = htons(ETHERTYPE_HOMEPLUG_AV);
 
@@ -156,7 +157,7 @@ int recv_read_confirmation(faifa_t *faifa, char *nvm, int *offset)
 	return res;
 }
 
-void nvm_write_file(char* nvm)
+void nvm_write_file(char* nvm, size_t size)
 {
 	const char *fname;
 	FILE *file;
@@ -169,7 +170,7 @@ void nvm_write_file(char* nvm)
 
 	file = fopen(fname, "w");
 
-	for (i = 0; i < 16352; i++)
+	for (i = 0; i < size; i++)
 		fprintf(file, "%c", nvm[i]);
 
 	fclose(file);	
@@ -178,26 +179,31 @@ void nvm_write_file(char* nvm)
 int nvm_dump(faifa_t *faifa)
 {
 	int offset = 0;
-	char *nvm = malloc(16352);
+	int sz = 1024;
+	char *nvm = malloc(1024);
 	int res = 0;
+	int err = 0;
 
-	/* this is super insecure */
-	while (offset < 16352) {
-		int len = (16352 - offset < 0x400) ?
-				16352 - offset :
-				0x400;
-		if (-1 == ((res = send_read_request(faifa, len, offset)))) {
-			break;
-		}
-		if (-1 == ((res = recv_read_confirmation(faifa, nvm, &offset)))) {
-			break;
+	while (!err) {
+		if (-1 == ((res = send_read_request(faifa, 1, offset))))
+			err++;
+		if (-1 == ((res = recv_read_confirmation(faifa, nvm, &offset))))
+			err++;
+		if (offset == sz) {
+			char * new_nvm;
+			sz *= 2;
+			new_nvm = realloc(nvm, sz);
+			if (new_nvm != NULL)
+				nvm = new_nvm;
+			else
+				err++;
 		}
 	}
 
-	nvm_write_file(nvm);
+	nvm_write_file(nvm, offset);
 
 	free(nvm);
-	return res;
+	return err ? -1 : 0;
 }
 
 struct write_request_frame {
@@ -310,8 +316,10 @@ void recv_write_confirmation(faifa_t *faifa)
 	struct write_confirmation_frame f;
 	int res;
 
-	res = faifa_recv(faifa, (char *)&f, sizeof(struct write_confirmation_frame));
+	res = faifa_recv(faifa, (char *)&f, 
+				sizeof(struct write_confirmation_frame));
 }
+
 /*
 int nvm_write(faifa_t *faifa)
 {
@@ -354,7 +362,7 @@ int main(int argc, char **argv)
 	char *opt_ifname = NULL;
 	char *opt_macaddr = NULL;
 	int opt_verbose = 0;
-	int opt_write = 0;
+/*	int opt_write = 0; */
 	int opt_dump = 0;
 	int c;
 	int ret = 0;
