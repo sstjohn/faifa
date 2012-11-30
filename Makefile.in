@@ -48,6 +48,9 @@ HPAV_CFG_OBJS:=sha2.o hpav_cfg.o crypto.o
 PIBTOOL_OBJS:=pibtool.o
 PIBTOOL_HEADERS:= faifa.h faifa_compat.h faifa_priv.h homeplug.h homeplug_av.h crypto.h device.h endian.h
 
+NVMTOOL_OBJS:=nvmtool.o
+NVMTOOL_HEADERS:= faifa.h faifa_compat.h faifa_priv.h homeplug.h homeplug_av.h crypto.h device.h endian.h
+
 ifeq ($(OS),DARWIN)
 LDFLAGS:=-dynamiclib -Wl,-dylib_install_name -Wl,$(LIB_SONAME)
 endif
@@ -66,13 +69,16 @@ man8dir = $(mandir)/man8
 MANTYP=8
 MANFIL=$(APP).8.gz
 
-all: $(APP) $(LIB_NAME) $(LIB_SONAME) hpav_cfg pibtool
+all: $(APP) $(LIB_NAME) $(LIB_SONAME) hpav_cfg pibtool nvmtool
 
 hpav_cfg: $(HPAV_CFG_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(HPAV_CFG_OBJS)
 
 pibtool: $(PIBTOOL_OBJS) $(PIBTOOL_HEADERS) $(LIB_SONAME)
 	$(CC) -D$(OS) -DSVN_REV=$(SVN_REV) $(CFLAGS) -o $@ $(PIBTOOL_OBJS) $(LIBS) $(LIB_SONAME)
+
+nvmtool: $(NVMTOOL_OBJS) $(NVMTOOL_HEADERS) $(LIB_SONAME)
+	$(CC) -D$(OS) -DSVN_REV=$(SVN_REV) $(CFLAGS) -o $@ $(NVMTOOL_OBJS) $(LIBS) $(LIB_SONAME)
 
 $(APP): $(OBJS) $(HEADERS) $(LIB_SONAME)
 	$(CC) -D$(OS) -DSVN_REV=$(SVN_REV) $(CFLAGS) -o $@ $(OBJS) $(LIBS) $(LIB_SONAME)

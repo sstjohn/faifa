@@ -1,5 +1,5 @@
 /*
- *  PIB retrieval
+ *  NVM retrieval
  *
  *  Copyright (C) 2007-2008 Xavier Carcelle <xavier.carcelle@gmail.com>
  *		    	    Florian Fainelli <florian@openwrt.org>
@@ -111,7 +111,7 @@ int send_read_request(faifa_t *faifa, int len, int offset)
 	f.payload.oui[1] = 0xb0;
 	f.payload.oui[2] = 0x52;
 
-	f.request.module_id = 2;
+	f.request.module_id = 1;
 	f.request.length = len;
 	f.request.offset = offset;
 	
@@ -135,7 +135,7 @@ uint32_t checksum(const char *data, size_t len)
 	return sum;
 }
 
-int recv_read_confirmation(faifa_t *faifa, char *pib, int *offset)
+int recv_read_confirmation(faifa_t *faifa, char *nvm, int *offset)
 {
 	struct read_confirmation_frame *f = malloc(ETHER_MAX_LEN);
 	int res;
@@ -147,7 +147,7 @@ int recv_read_confirmation(faifa_t *faifa, char *pib, int *offset)
 	if (cksum != f->response.checksum)
 		printf("checksum mismatch %08x != %08x !\n", cksum, f->response.checksum);
 
- 	memcpy(&pib[*offset], &f->response.data, f->response.length);
+ 	memcpy(&nvm[*offset], &f->response.data, f->response.length);
 	*offset += f->response.length;
 
 
@@ -156,7 +156,7 @@ int recv_read_confirmation(faifa_t *faifa, char *pib, int *offset)
 	return res;
 }
 
-void pib_write_file(char* pib)
+void nvm_write_file(char* nvm)
 {
 	const char *fname;
 	FILE *file;
@@ -165,20 +165,20 @@ void pib_write_file(char* pib)
 	if (NULL != opt_fname)
 		fname = opt_fname;
 	else
-		fname = "./pibtool.out";
+		fname = "./nvmtool.out";
 
 	file = fopen(fname, "w");
 
 	for (i = 0; i < 16352; i++)
-		fprintf(file, "%c", pib[i]);
+		fprintf(file, "%c", nvm[i]);
 
 	fclose(file);	
 }
 
-int pib_dump(faifa_t *faifa)
+int nvm_dump(faifa_t *faifa)
 {
 	int offset = 0;
-	char *pib = malloc(16352);
+	char *nvm = malloc(16352);
 	int res = 0;
 
 	/* this is super insecure */
@@ -189,14 +189,14 @@ int pib_dump(faifa_t *faifa)
 		if (-1 == ((res = send_read_request(faifa, len, offset)))) {
 			break;
 		}
-		if (-1 == ((res = recv_read_confirmation(faifa, pib, &offset)))) {
+		if (-1 == ((res = recv_read_confirmation(faifa, nvm, &offset)))) {
 			break;
 		}
 	}
 
-	pib_write_file(pib);
+	nvm_write_file(nvm);
 
-	free(pib);
+	free(nvm);
 	return res;
 }
 
@@ -254,7 +254,7 @@ int send_commit_write_to_nvm(faifa_t *faifa, int module)
 	
 }	
 
-int send_write_request(faifa_t *faifa, const char *pib, int offset, int len)
+int send_write_request(faifa_t *faifa, const char *nvm, int offset, int len)
 {
 	struct write_request_frame *f = malloc(ETHER_MAX_LEN);
 	int res = 0;
@@ -269,12 +269,12 @@ int send_write_request(faifa_t *faifa, const char *pib, int offset, int len)
 	f->payload.oui[1] = 0xb0;
 	f->payload.oui[2] = 0x52;
 
-	f->request.module_id = 2;
+	f->request.module_id = 1;
 	f->request.length = len;
 	f->request.offset = offset;
-	f->request.checksum = checksum(&pib[offset], len);
+	f->request.checksum = checksum(&nvm[offset], len);
 
-	memcpy(&f->request.data, &pib[offset], len);
+	memcpy(&f->request.data, &nvm[offset], len);
 	
 	res = faifa_send(faifa, f, sizeof(struct write_request_frame) + len);
 	if(-1 == res) {
@@ -284,7 +284,7 @@ int send_write_request(faifa_t *faifa, const char *pib, int offset, int len)
 	return res;
 }
 
-void pib_read_file(char *pib)
+void nvm_read_file(char *nvm)
 {
 	const char *fname;
 	FILE *file;
@@ -293,12 +293,12 @@ void pib_read_file(char *pib)
 	if (NULL != opt_fname)
 		fname = opt_fname;
 	else
-		fname = "./pibtool.in";
+		fname = "./nvmtool.in";
 
 	file = fopen(fname, "r");
 
 	while (!feof(file)) {
-		int read = fread(&pib[offset], 1, 0x400, file);
+		int read = fread(&nvm[offset], 1, 0x400, file);
 		offset += read;	
 	}
 
@@ -312,25 +312,25 @@ void recv_write_confirmation(faifa_t *faifa)
 
 	res = faifa_recv(faifa, (char *)&f, sizeof(struct write_confirmation_frame));
 }
-
-int pib_write(faifa_t *faifa)
+/*
+int nvm_write(faifa_t *faifa)
 {
-	char *pib = malloc(16352);
+	char *nvm = malloc(16352);
 	int offset = 0;
 
-	pib_read_file(pib);
+	nvm_read_file(nvm);
 
 	for (offset = 0; offset < 16352; offset += 0x400) {
 		int len = (offset + 0x400 > 16352) ?
 				16352 - offset :
 				0x400;
-		send_write_request(faifa, pib, offset, len);
+		send_write_request(faifa, nvm, offset, len);
 		recv_write_confirmation(faifa);
 	}
 	
 	send_commit_write_to_nvm(faifa, 2);	
 }
-
+*/
 
 void checksum_test()
 {
@@ -383,10 +383,10 @@ int main(int argc, char **argv)
 			case 'd':
 				opt_dump = 1;
 				break;
-			case 'w':
+/*			case 'w':
 				opt_write = 1;
 				break;
-			case 'k':
+*/			case 'k':
 				opt_key = 1;
 				break;
 			case 'v':
@@ -434,10 +434,10 @@ int main(int argc, char **argv)
 	checksum_test();
 
 	if (opt_dump) {
-		pib_dump(faifa);
-	} else if (opt_write) {
-		pib_write(faifa);
-	} else {
+		nvm_dump(faifa);
+/*	} else if (opt_write) {
+		nvm_write(faifa);
+*/	} else {
 		error("nothing to do");
 		ret = -1;
 	}
